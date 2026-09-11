@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: recon-db
+    environment:
+      POSTGRES_USER: recon
+      POSTGRES_PASSWORD: recon
+      POSTGRES_DB: recon
+    ports:
+      - "5433:5432"
+    volumes:
+      - recon-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recon -d recon"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  recon-pgdata:
