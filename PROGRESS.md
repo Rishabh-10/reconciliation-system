@@ -16,23 +16,23 @@ settlement `12395580393`, and its 54,979 detail rows add up to exactly that.
 file covers one. Narrowing until the totals meet:
 
 | payments filter, settlement 12395580393 | sum of `total` |
-|---|---:|
-| all rows | 121,902.51 |
-| `Transaction status = Released` | 78,362.44 |
-| Released, without the bank transfer | **212,118.95** |
+| --------------------------------------- | -------------: |
+| all rows                                |     121,902.51 |
+| `Transaction status = Released`         |      78,362.44 |
+| Released, without the bank transfer     | **212,118.95** |
 
 The 2,398 Deferred rows sum to 43,540.07, exactly the gap. They are not in the settlement report
 because they have not been released into it. The config schema has no status column, so this is a
 scoping rule in the pipeline, not a mapping defect.
 
 **The `date` in `record_ref` is the release date in UTC.** Payments times are GMT+9, settlement
-times are UTC, and the payments *posted* date is not the settlement posted date. Tested on the
+times are UTC, and the payments _posted_ date is not the settlement posted date. Tested on the
 15,745 in-scope order rows, keyed on `order id + sku + date`:
 
-| date rule | matches |
-|---|---:|
-| posted date, GMT+9 or UTC | 0 |
-| release date, GMT+9 | 8,145 |
+| date rule                          |    matches |
+| ---------------------------------- | ---------: |
+| posted date, GMT+9 or UTC          |          0 |
+| release date, GMT+9                |      8,145 |
 | **release date, converted to UTC** | **13,328** |
 
 13,328 is exactly the number of `Order / ItemPrice / Principal` settlement rows. Confirmed on one
@@ -84,14 +84,18 @@ Three bugs found while building:
 The defects were found with the help of Claude Code, running the queries below against the ingested
 data. Every figure here comes from those queries.
 
+After looking at the summary report, tracking that back to the actual row was a bit difficult as for cases
+like `sales_product_charges`, to generate the queries for find the actual combination that matched that amount
+which was missing was done by Claude Code.
+
 Before the fixes:
 
-| Summary line | payments − settlements |
-|---|---:|
-| Product Charges | +103.78 |
-| Shipping | −103.42 |
-| Other | −0.36 |
-| Refund expenses | +42.59 |
+| Summary line    | payments − settlements |
+| --------------- | ---------------------: |
+| Product Charges |                +103.78 |
+| Shipping        |                −103.42 |
+| Other           |                  −0.36 |
+| Refund expenses |                 +42.59 |
 
 The first three net to exactly zero, so that money is misfiled rather than missing. The fourth is the
 entire gap between the payments total (212,161.54) and Amazon's payout.
@@ -103,11 +107,11 @@ payments `product_sales` = settlement `ItemPrice/Principal` (335,336.96 over 13,
 **The cause.** The payments report carries combined money columns; the settlement report carries
 their parts. Measured on the ingested data, to the cent:
 
-| payments column | settlement parts | both |
-|---|---|---:|
-| ORDER `sales tax collected` | Tax + ShippingTax + TaxDiscount + GiftWrapTax | 13,675.59 |
-| ORDER `low value goods` | LowValueGoodsTax-Principal + -Shipping | −196.62 |
-| REFUND `sales tax collected` | refund Tax + ShippingTax + TaxDiscount | −42.59 |
+| payments column              | settlement parts                              |      both |
+| ---------------------------- | --------------------------------------------- | --------: |
+| ORDER `sales tax collected`  | Tax + ShippingTax + TaxDiscount + GiftWrapTax | 13,675.59 |
+| ORDER `low value goods`      | LowValueGoodsTax-Principal + -Shipping        |   −196.62 |
+| REFUND `sales tax collected` | refund Tax + ShippingTax + TaxDiscount        |    −42.59 |
 
 A combined column can route to only one summary field, so every settlement part of it must route to
 that same field. The shipped configs spread the tax parts over Product Charges, Shipping and Other.
@@ -123,16 +127,16 @@ same amount as a refund expense.
 
 ### How each defect was found
 
-| Defect | Query |
-|---|---|
-| 1, 2 duplicate rules | `GROUP BY transaction_type, description, amount_field HAVING count(*) > 1` on `config_payment` |
-| 3 tax scattered | one order's rows from both sides, then where the tax rules point, then the two sums above |
-| 4 refund tax dropped | `WHERE in_scope AND summary_field = '' AND amount_type <> 'total'` on `records` |
-| 5 malformed template | `record_ref LIKE '%settlement_id%settlement_id%'` |
-| 6 empty template | `record_ref = ''` |
-| 7 key with a blank part | `record_ref LIKE '+%'` on `records` |
-| 8, 9 keys that cannot meet | template parts of one config `EXCEPT` those of the other |
-| 10 asymmetric signs | list the `REFUND / ITEMPRICE` family and spot the odd row |
+| Defect                     | Query                                                                                          |
+| -------------------------- | ---------------------------------------------------------------------------------------------- |
+| 1, 2 duplicate rules       | `GROUP BY transaction_type, description, amount_field HAVING count(*) > 1` on `config_payment` |
+| 3 tax scattered            | one order's rows from both sides, then where the tax rules point, then the two sums above      |
+| 4 refund tax dropped       | `WHERE in_scope AND summary_field = '' AND amount_type <> 'total'` on `records`                |
+| 5 malformed template       | `record_ref LIKE '%settlement_id%settlement_id%'`                                              |
+| 6 empty template           | `record_ref = ''`                                                                              |
+| 7 key with a blank part    | `record_ref LIKE '+%'` on `records`                                                            |
+| 8, 9 keys that cannot meet | template parts of one config `EXCEPT` those of the other                                       |
+| 10 asymmetric signs        | list the `REFUND / ITEMPRICE` family and spot the odd row                                      |
 
 Defects 5 to 10 move no number this period; they were found by reading the config tables.
 
